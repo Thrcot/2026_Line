@@ -40,18 +40,21 @@ const int LINE[19] = {IN1, IN2, IN3, IN4, IN5, IN6, IN7, IN8, IN9, IN10, IN11, I
 HardwareSerial SerialPC(UART1_RX, UART1_TX);
 HardwareSerial SerialMain(UART2_RX, UART2_TX);
 
-int brightness = 230; //180
-int threshold = 145; //95
+uint8_t brightness = 230; //180
+uint8_t threshold = 155; //95
 
-#define LINE_INIT 0xAD
-#define LINE_INFO 0xAE
-#define LINE_OK 0xAF
+#define LINE_SetThreshold 0xAB
+#define LINE_SENSOR_INFO 0xAC
+#define LINE_SENSOR_HEADER 0xAD
+#define LINE_CARIBRATION_ERROR 0xAE
+#define LINE_ANGLE_INFO 0xAF
 
 const float STEP = 360.0f / RING_LINE;
 
-float culcAngle();
-void initLine();
-void sendfloat(float f);
+void sendInt16(int16_t val);
+void sensorInfo();
+uint8_t readThreshold();
+int16_t calcEscapeAngleFromRing16();
 
 void setup() {
 	SerialPC.begin(115200);
@@ -71,163 +74,129 @@ void setup() {
 }
 
 void loop() {
-	float angle = 0.0;
+	int16_t angle = -1;
 
-	SerialPC.print(digitalRead(IN1));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN2));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN3));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN4));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN5));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN6));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN7));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN8));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN9));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN10));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN11));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN12));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN13));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN14));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN15));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN16));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN17));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN18));
-	SerialPC.print(" ");
-	SerialPC.print(digitalRead(IN19));
-	SerialPC.println();
-
-	if (digitalRead(IN17) && digitalRead(IN19)) {
-		angle = 180.0;
+	// 外側3本(17〜19)が優先（今のロジックそのままでOK）
+	if (digitalRead(IN17) && digitalRead(IN19)||digitalRead(IN2)||digitalRead(IN1)||digitalRead(IN16)) {
+	angle = 180;
 	} else if (digitalRead(IN17) && digitalRead(IN18)) {
-		angle = 45.0;
+	angle = 45;
 	} else if (digitalRead(IN18) && digitalRead(IN19)) {
-		angle = 315.0;
+	angle = 315;
 	} else if (digitalRead(IN17)) {
-		angle = 90.0;
+	angle = 90;
 	} else if (digitalRead(IN18)) {
-		angle = 0.0;
+	angle = 0;
 	} else if (digitalRead(IN19)) {
-		angle = 270.0;
-	} else if (digitalRead(IN1) || digitalRead(IN2) || digitalRead(IN3) || digitalRead(IN16) || digitalRead(IN15)) {
-		angle = 180.0;
-	} else {
-		angle = -1.0;
+	angle = 270;
+	}else{
+	// リング(1〜16)で逃げ方向を作る
+	//angle = calcEscapeAngleFromRing16();
+  angle = -1;
 	}
-	SerialPC.println(angle);
 
+    //SerialPC.printf(">angle:");
+    //SerialPC.println(angle);
+
+	// 送受信処理
 	if (SerialMain.available()) {
-		int cmd = SerialMain.read();
-		SerialPC.println(cmd);
-		digitalWrite(L1, !digitalRead(L1));
-		sendfloat(angle);
+		uint8_t cmd = SerialMain.read();
+		if(cmd == LINE_ANGLE_INFO){
+			digitalWrite(L1, !digitalRead(L1));
+			sendInt16(angle);
+		}else if(cmd == LINE_SENSOR_INFO){
+			sensorInfo();
+		}else if(cmd == LINE_SetThreshold){
+			uint8_t val = readThreshold();
+			if(val != 0xFF){
+				threshold = val;
+				analogWrite(THRESHOLD, threshold);
+				SerialPC.print("Set Threshold:");
+				SerialPC.println(threshold);
+			}
+		}
+		SerialPC.println(cmd, HEX);
 	}
 	delay(1);
 }
 
-void sendfloat(float f) {
-	byte *data = (byte *)&f;
-	for (int i = 0; i < 4; i++) {
-		SerialMain.write(data[i]);
-	}
-	digitalWrite(L2, !digitalRead(L2));
-	SerialPC.print(data[0]);
-	SerialPC.print(" ");
-	SerialPC.print(data[1]);
-	SerialPC.print(" ");
-	SerialPC.print(data[2]);
-	SerialPC.print(" ");
-	SerialPC.println(data[3]);
+void sendInt16(int16_t val){
+  byte *data = (byte *)&val;
+  for (int j = 0; j < 2; j++) {  // int16_t は 2 バイト
+    SerialMain.write(data[j]);
+  }
+  digitalWrite(L2, !digitalRead(L2));
+
+  /*
+  SerialPC.print(data[0]);
+  SerialPC.print(" ");
+  SerialPC.println(data[1]);
+  */
 }
 
-/*
-float culcAngle() {
-	int RINGLine[RING_LINE];
-	int BrightLine[RING_LINE];
-	int DarkLine[RING_LINE];
-	int bright = 0;
-	int dark = 0;
+void sensorInfo() {
+    SerialMain.write(LINE_SENSOR_HEADER); // ヘッダ送信
 
-	for (int i = 0; i < RING_LINE; i++) {
-		RINGLine[i] = digitalRead(LINE[i]);
-		if (RINGLine[i] == 1) {
-			BrightLine[bright] = i;
-			bright++;
-		} else {
-			DarkLine[dark] = i;
-			dark++;
-		}
-	}
-
-	
-	if (Line[16] == 1) {
-		return 90.0;
-	} else if (Line[17] == 1) {
-		return 0.0;
-	} else if (Line[18] == 1) {
-		return 270.0;
-	} else if ((Line[16] == 1) && (Line[18] == 1)) {
-		return 180.0;
-	}
-	
-}
-*/
-
-float culcAngle() {
-
-    float sumX = 0;
-    float sumY = 0;
-    bool detected = false;
-
-    // センサ読み取り
-    for (int i = 0; i < RING_LINE; i++) {
-
-        int v = digitalRead(LINE[i]);  // 白=1
-
-        if (v == 1) {
-            detected = true;
-
-            float angle = i * STEP * DEG_TO_RAD; // CCW方向ラジアン
-            sumX += cos(angle);
-            sumY += sin(angle);
-        }
+    uint32_t bits = 0; // 32bit 変数で19ビットをまとめる
+    for (int i = 0; i < 19; i++) {
+        int v = digitalRead(LINE[i]); // 1:白ライン, 0:黒
+        if (v) bits |= (1UL << i);
     }
 
-    // 白ラインが1つも無ければ -1 を返す
-    if (!detected) return -1;
+    // 19ビットを3バイトに分けて送信
+    SerialMain.write((bits >> 0) & 0xFF);   // 下位8bit
+    SerialMain.write((bits >> 8) & 0xFF);   // 中位8bit
+    SerialMain.write((bits >> 16) & 0x07);  // 上位3bit
 
-    // 重心角度（CCW）
-    float angleCCW = atan2(sumY, sumX) * RAD_TO_DEG;
-    if (angleCCW < 0) angleCCW += 360;
-
-    // メインマイコン用にCWへ変換
-    float angleCW = 360.0f - angleCCW;
-    if (angleCW >= 360.0f) angleCW -= 360.0f;
-
-    return angleCW;
+    // デバッグ用LED
+    digitalWrite(L2, !digitalRead(L2));
 }
 
-void initLine() {
-	for (int i = 0; i < 256; i++) {
-		analogWrite(THRESHOLD, i);
-		int val[ALL_LINE];
-		for (int i = 0; i < ALL_LINE; i++) {
-			val[i] = digitalRead(LINE[i]);
-		}
-	}
+uint8_t readThreshold() {
+    unsigned long startTime = millis();
+    while (SerialMain.available() < 1) {
+        if (millis() - startTime > 10) {  // 10ms タイムアウト
+            return 0xFF;  // 受信失敗
+        }
+    }
+	digitalWrite(L2, !digitalRead(L2));
+    return SerialMain.read();
+}
+
+int16_t calcEscapeAngleFromRing16() {
+  static const float step = 360.0f / 16.0f;
+
+  float sumX = 0.0f;
+  float sumY = 0.0f;
+
+  bool detected = false;
+
+  for (int i = 0; i < 16; i++) {
+    int v = digitalRead(LINE[i]);
+    if (v) {
+      detected = true;
+
+      // ラインがある方向（センサの向き）
+      float ang = (i * step) * DEG_TO_RAD;   // CCW
+      sumX += cos(ang);
+      sumY += sin(ang);
+    }
+  }
+
+  if (!detected){
+	return -1;
+  }
+
+  // ライン方向（0〜360）
+  float lineAng = atan2(sumY, sumX) * RAD_TO_DEG;
+  if (lineAng < 0){
+	lineAng += 360.0f;
+  }
+
+  // 逃げ方向 = ライン方向 + 180
+  float escapeAng = lineAng + 180.0f;
+  if (escapeAng >= 360.0f){
+	escapeAng -= 360.0f;
+  }
+  return (int16_t)(escapeAng + 0.5f); // 四捨五入
 }
