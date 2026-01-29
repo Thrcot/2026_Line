@@ -193,7 +193,7 @@ int16_t calcEscapeAngleFromRing16() {
 	lineAng += 360.0f;
   }
 
-  // 逃げ方向 = ライン方向 + 180
+  // 逃げ方向 = ライン方向反転
   float escapeAng = lineAng + 180.0f;
   if (escapeAng >= 360.0f){
 	escapeAng -= 360.0f;
