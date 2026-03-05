@@ -24,13 +24,9 @@
 #define IN14 PC4
 #define IN15 PC5
 #define IN16 PB0
-#define IN17 PB1
-#define IN18 PB2
-#define IN19 PB9
 
-const int LINE[19] = {IN1, IN2, IN3, IN4, IN5, IN6, IN7, IN8, IN9, IN10, IN11, IN12, IN13, IN14, IN15, IN16, IN17, IN18, IN19};
 #define RING_LINE 16
-#define ALL_LINE 18
+const int LINE[RING_LINE] = {IN1, IN2, IN3, IN4, IN5, IN6, IN7, IN8, IN9, IN10, IN11, IN12, IN13, IN14, IN15, IN16};
 
 #define L1 PA11
 #define L2 PA12
@@ -68,7 +64,7 @@ void setup() {
 	digitalWrite(L1, HIGH);
 	digitalWrite(L2, HIGH);
 
-	for (int i = 0; i < 19; i++) {
+	for (int i = 0; i < RING_LINE; i++) {
 		pinMode(LINE[i], INPUT_PULLUP);
 	}
 }
@@ -76,27 +72,7 @@ void setup() {
 void loop() {
 	int16_t angle = -1;
 
-	// 外側3本(17〜19)が優先（今のロジックそのままでOK）
-	if (digitalRead(IN17) && digitalRead(IN19)||digitalRead(IN2)||digitalRead(IN1)||digitalRead(IN16)) {
-	angle = 180;
-	} else if (digitalRead(IN17) && digitalRead(IN18)) {
-	angle = 45;
-	} else if (digitalRead(IN18) && digitalRead(IN19)) {
-	angle = 315;
-	} else if (digitalRead(IN17)) {
-	angle = 90;
-	} else if (digitalRead(IN18)) {
-	angle = 0;
-	} else if (digitalRead(IN19)) {
-	angle = 270;
-	}else{
-	// リング(1〜16)で逃げ方向を作る
 	//angle = calcEscapeAngleFromRing16();
-  angle = -1;
-	}
-
-    //SerialPC.printf(">angle:");
-    //SerialPC.println(angle);
 
 	// 送受信処理
 	if (SerialMain.available()) {
@@ -138,7 +114,7 @@ void sensorInfo() {
     SerialMain.write(LINE_SENSOR_HEADER); // ヘッダ送信
 
     uint32_t bits = 0; // 32bit 変数で19ビットをまとめる
-    for (int i = 0; i < 19; i++) {
+    for (int i = 0; i < RING_LINE; i++) {
         int v = digitalRead(LINE[i]); // 1:白ライン, 0:黒
         if (v) bits |= (1UL << i);
     }
@@ -171,7 +147,7 @@ int16_t calcEscapeAngleFromRing16() {
 
   bool detected = false;
 
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < RING_LINE; i++) {
     int v = digitalRead(LINE[i]);
     if (v) {
       detected = true;
