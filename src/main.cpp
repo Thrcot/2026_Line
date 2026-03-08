@@ -72,7 +72,7 @@ void setup() {
 void loop() {
 	int16_t angle = -1;
 
-	//angle = calcEscapeAngleFromRing16();
+	angle = calcEscapeAngleFromRing16();
 
 	// 送受信処理
 	if (SerialMain.available()) {
@@ -141,38 +141,49 @@ uint8_t readThreshold() {
 
 int16_t calcEscapeAngleFromRing16() {
   static const float step = 360.0f / 16.0f;
-
   float sumX = 0.0f;
   float sumY = 0.0f;
-
   bool detected = false;
+  static float firstEscapeAngle = -1;
 
   for (int i = 0; i < RING_LINE; i++) {
     int v = digitalRead(LINE[i]);
     if (v) {
       detected = true;
-
-      // ラインがある方向（センサの向き）
-      float ang = (i * step) * DEG_TO_RAD;   // CCW
+      float ang = (-i * step) * DEG_TO_RAD;
       sumX += cos(ang);
       sumY += sin(ang);
     }
   }
 
-  if (!detected){
-	return -1;
+  if (!detected) {
+    firstEscapeAngle = -1;
+    return -1;
   }
 
-  // ライン方向（0〜360）
-  float lineAng = atan2(sumY, sumX) * RAD_TO_DEG;
-  if (lineAng < 0){
-	lineAng += 360.0f;
+  float lineAngle = atan2(sumY, sumX) * RAD_TO_DEG;
+  if (lineAngle < 0){
+    lineAngle += 360.0f;
+  }
+  if(firstEscapeAngle == -1){
+    firstEscapeAngle = lineAngle + 180.0f;
+    if (firstEscapeAngle >= 360){
+      firstEscapeAngle -= 360;
+    }
   }
 
-  // 逃げ方向 = ライン方向反転
-  float escapeAng = lineAng + 180.0f;
-  if (escapeAng >= 360.0f){
-	escapeAng -= 360.0f;
-  }
-  return (int16_t)(escapeAng + 0.5f); // 四捨五入
+  float escapeAng = lineAngle + 180.0f;
+  if (escapeAng >= 360.0f) escapeAng -= 360.0f;
+
+  float diff = escapeAng - firstEscapeAngle;
+  while (diff > 180) diff -= 360;
+  while (diff < -180) diff += 360;
+  if (diff > 45) diff = 45;
+  if (diff < -45) diff = -45;
+
+  float limited = firstEscapeAngle + diff;
+  if (limited < 0) limited += 360;
+  if (limited >= 360) limited -= 360;
+
+  return (int16_t)(limited + 0.5f);
 }
