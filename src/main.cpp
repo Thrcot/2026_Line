@@ -143,47 +143,47 @@ int16_t calcEscapeAngleFromRing16() {
   static const float step = 360.0f / 16.0f;
   float sumX = 0.0f;
   float sumY = 0.0f;
-  bool detected = false;
+  int detected = 0;
   static float firstEscapeAngle = -1;
 
   for (int i = 0; i < RING_LINE; i++) {
     int v = digitalRead(LINE[i]);
     if (v) {
-      detected = true;
+      detected++;
       float ang = (-i * step) * DEG_TO_RAD;
       sumX += cos(ang);
       sumY += sin(ang);
     }
   }
 
-  if (!detected) {
+  if (detected <= 1) {
     firstEscapeAngle = -1;
     return -1;
-  }
-
-  float lineAngle = atan2(sumY, sumX) * RAD_TO_DEG;
-  if (lineAngle < 0){
-    lineAngle += 360.0f;
-  }
-  if(firstEscapeAngle == -1){
-    firstEscapeAngle = lineAngle + 180.0f;
-    if (firstEscapeAngle >= 360){
-      firstEscapeAngle -= 360;
+  }else{
+    float lineAngle = atan2(sumY, sumX) * RAD_TO_DEG;
+    if (lineAngle < 0){
+      lineAngle += 360.0f;
     }
+    if(firstEscapeAngle == -1){
+      firstEscapeAngle = lineAngle + 180.0f;
+      if (firstEscapeAngle >= 360){
+        firstEscapeAngle -= 360;
+      }
+    }
+
+    float escapeAng = lineAngle + 180.0f;
+    if (escapeAng >= 360.0f) escapeAng -= 360.0f;
+
+    float diff = escapeAng - firstEscapeAngle;
+    while (diff > 180) diff -= 360;
+    while (diff < -180) diff += 360;
+    if (diff > 45) diff = 45;
+    if (diff < -45) diff = -45;
+
+    float limited = firstEscapeAngle + diff;
+    if (limited < 0) limited += 360;
+    if (limited >= 360) limited -= 360;
+
+    return (int16_t)(limited + 0.5f);
   }
-
-  float escapeAng = lineAngle + 180.0f;
-  if (escapeAng >= 360.0f) escapeAng -= 360.0f;
-
-  float diff = escapeAng - firstEscapeAngle;
-  while (diff > 180) diff -= 360;
-  while (diff < -180) diff += 360;
-  if (diff > 45) diff = 45;
-  if (diff < -45) diff = -45;
-
-  float limited = firstEscapeAngle + diff;
-  if (limited < 0) limited += 360;
-  if (limited >= 360) limited -= 360;
-
-  return (int16_t)(limited + 0.5f);
 }
