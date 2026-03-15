@@ -140,23 +140,39 @@ uint8_t readThreshold() {
 }
 
 int16_t calcEscapeAngleFromRing16() {
+
   static const float step = 360.0f / 16.0f;
+
   float sumX = 0;
   float sumY = 0;
   int detected = 0;
+
+  int first = -1;
+  int last = -1;
 
   static float escapeAngle = -1;
   static int entryIndex = -1;
   static int lastIndex = -1;
 
   static bool escaping = false;
+
   int centerIndex = -1;
 
   for (int i = 0; i < RING_LINE; i++) {
+
     int v = digitalRead(LINE[i]);
+
     if (v) {
+
       detected++;
+
+      if (first == -1)
+        first = i;
+
+      last = i;
+
       float ang = (-i * step) * DEG_TO_RAD;
+
       sumX += cos(ang);
       sumY += sin(ang);
     }
@@ -164,27 +180,52 @@ int16_t calcEscapeAngleFromRing16() {
 
   // ライン検出
   if (detected > 1) {
+
     float lineAngle = atan2(sumY, sumX) * RAD_TO_DEG;
+
     if (lineAngle < 0)
       lineAngle += 360;
-    centerIndex = (int)(lineAngle / STEP + 0.5f) % RING_LINE;
+
+    // ===== センサ中心計算 =====
+
+    int width = last - first;
+
+    if (width < 8)
+      centerIndex = (first + last) / 2;
+
+    else {
+      int mid = (first + last + RING_LINE) / 2;
+      centerIndex = mid % RING_LINE;
+    }
+
+    // ===== escape角 =====
+
     float newEscape = lineAngle + 180;
+
     if (newEscape >= 360)
       newEscape -= 360;
+
     if (!escaping) {
+
       escaping = true;
+
       entryIndex = centerIndex;
+
       escapeAngle = newEscape;
     }
 
     lastIndex = centerIndex;
+
     float diff = newEscape - escapeAngle;
+
     while (diff > 180) diff -= 360;
     while (diff < -180) diff += 360;
 
     if (diff > 45) diff = 45;
     if (diff < -45) diff = -45;
+
     float limited = escapeAngle + diff;
+
     if (limited < 0) limited += 360;
     if (limited >= 360) limited -= 360;
 
@@ -193,22 +234,33 @@ int16_t calcEscapeAngleFromRing16() {
 
   // ライン消失
   else {
+
     if (escaping) {
+
       int d = abs(lastIndex - entryIndex);
+
       if (d > 8)
         d = 16 - d;
+
       // 通常復帰
       if (d <= 5) {
+
         escaping = false;
+
         entryIndex = -1;
         lastIndex = -1;
         escapeAngle = -1;
+
         return -1;
       }
+
+      // ライン跨ぎ
       else {
+
         return (int16_t)(escapeAngle + 0.5f);
       }
     }
+
     return -1;
   }
 }
