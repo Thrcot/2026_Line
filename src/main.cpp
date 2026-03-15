@@ -44,6 +44,7 @@ uint8_t threshold = 155; //95
 #define LINE_SENSOR_HEADER 0xAD
 #define LINE_CARIBRATION_ERROR 0xAE
 #define LINE_ANGLE_INFO 0xAF
+#define LINE_RESET 0xB0
 
 const float STEP = 360.0f / RING_LINE;
 
@@ -90,7 +91,10 @@ void loop() {
 				SerialPC.print("Set Threshold:");
 				SerialPC.println(threshold);
 			}
-		}
+    } else if (cmd == LINE_RESET) {
+      angle = -1;
+      SerialPC.println("Reset Angle");
+    }
 		SerialPC.println(cmd, HEX);
 	}
 	delay(1);
@@ -243,7 +247,7 @@ int16_t calcEscapeAngleFromRing16() {
         d = 16 - d;
 
       // 通常復帰
-      if (d <= 5) {
+      if (d <= 6) {
 
         escaping = false;
 
