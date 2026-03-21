@@ -1,5 +1,6 @@
 #include "Arduino.h"
 
+// define pins
 #define UART1_TX PA9
 #define UART1_RX PA10
 
@@ -31,12 +32,12 @@
 #define L2 PA12
 #define LEDCtrl PB4
 
+// define classes
 HardwareSerial SerialPC(UART1_RX, UART1_TX);
 HardwareSerial SerialMain(UART2_RX, UART2_TX);
+HardwareTimer *timer = nullptr;
 
-uint8_t brightness = 230;
-uint8_t threshold = 155;
-
+// define valiables
 #define LINE_SetThreshold 0xAB
 #define LINE_SENSOR_INFO 0xAC
 #define LINE_SENSOR_HEADER 0xAD
@@ -46,9 +47,11 @@ uint8_t threshold = 155;
 
 const float STEP = 360.0f / RING_LINE;
 
-// =========================
-// 🔥 高速ビット取得
-// =========================
+volatile uint8_t LineInfo[RING_LINE];
+
+uint8_t brightness = 230;
+uint8_t threshold = 155;
+
 inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
   switch (i) {
     case 0:  return (C >> 13) & 1;
@@ -71,20 +74,18 @@ inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
   return 0;
 }
 
-// =========================
-// 関数宣言
-// =========================
+// define functions
+void setupTimer();
+void timerISR();
 void sendInt16(int16_t val);
 void sensorInfo();
 uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
 
-// =========================
-// SETUP
-// =========================
 void setup() {
   SerialPC.begin(115200);
   SerialMain.begin(115200);
+  setupTimer();
 
   pinMode(THRESHOLD, OUTPUT);
   analogWrite(THRESHOLD, threshold);
@@ -97,7 +98,7 @@ void setup() {
   digitalWrite(L1, HIGH);
   digitalWrite(L2, HIGH);
 
-  // 入力設定（Arduino側の初期化だけ使う）
+  // 入力設定
   pinMode(IN1, INPUT_PULLUP);
   pinMode(IN2, INPUT_PULLUP);
   pinMode(IN3, INPUT_PULLUP);
@@ -116,9 +117,6 @@ void setup() {
   pinMode(IN16, INPUT_PULLUP);
 }
 
-// =========================
-// LOOP
-// =========================
 void loop() {
   int16_t angle = calcEscapeAngleFromRing16();
 
@@ -145,21 +143,38 @@ void loop() {
   }
 }
 
-// =========================
-// センサ情報送信（高速版）
-// =========================
-void sensorInfo() {
-  SerialMain.write(LINE_SENSOR_HEADER);
+void setupTimer() {
+  timer = new HardwareTimer(TIM2);
+
+  timer->setOverflow(2000, HERTZ_FORMAT); // 2kHz
+  timer->attachInterrupt(timerISR);
+  timer->resume();
+}
+
+void timerISR() {
 
   uint32_t A = GPIOA->IDR;
   uint32_t B = GPIOB->IDR;
   uint32_t C = GPIOC->IDR;
 
+  for (int i = 0; i < RING_LINE; i++) {
+    LineInfo[i] = fastReadIndex(i, A, B, C);
+  }
+}
+
+void sensorInfo() {
+  SerialMain.write(LINE_SENSOR_HEADER);
+
   uint32_t bits = 0;
 
+  uint8_t buffer[RING_LINE];
+
+  noInterrupts();
+  memcpy(buffer, (const void*)LineInfo, RING_LINE);
+  interrupts();
+
   for (int i = 0; i < RING_LINE; i++) {
-    int v = fastReadIndex(i, A, B, C);
-    if (v) bits |= (1UL << i);
+    if (buffer[i]) bits |= (1UL << i);
   }
 
   SerialMain.write((bits >> 0) & 0xFF);
@@ -169,9 +184,6 @@ void sensorInfo() {
   digitalWrite(L2, !digitalRead(L2));
 }
 
-// =========================
-// 角度計算（高速版）
-// =========================
 int16_t calcEscapeAngleFromRing16() {
 
   uint32_t A = GPIOA->IDR;
@@ -265,9 +277,6 @@ int16_t calcEscapeAngleFromRing16() {
   }
 }
 
-// =========================
-// その他
-// =========================
 void sendInt16(int16_t val){
   byte *data = (byte *)&val;
   SerialMain.write(data[0]);
