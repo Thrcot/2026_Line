@@ -186,10 +186,6 @@ void sensorInfo() {
 
 int16_t calcEscapeAngleFromRing16() {
 
-  uint32_t A = GPIOA->IDR;
-  uint32_t B = GPIOB->IDR;
-  uint32_t C = GPIOC->IDR;
-
   float sumX = 0;
   float sumY = 0;
   int detected = 0;
@@ -204,9 +200,16 @@ int16_t calcEscapeAngleFromRing16() {
 
   int centerIndex = -1;
 
+  // 安全にコピー
+  uint8_t buf[RING_LINE];
+
+  noInterrupts();
+  memcpy(buf, (const void*)LineInfo, RING_LINE);
+  interrupts();
+
   for (int i = 0; i < RING_LINE; i++) {
 
-    int v = fastReadIndex(i, A, B, C);
+    int v = buf[i];
 
     if (v) {
       detected++;
