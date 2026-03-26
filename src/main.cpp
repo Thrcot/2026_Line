@@ -44,13 +44,14 @@ HardwareTimer *timer = nullptr;
 #define LINE_CARIBRATION_ERROR 0xAE
 #define LINE_ANGLE_INFO 0xAF
 #define LINE_RESET 0xB0
+#define LINE_TRACE_INFO 0xB1
 
 const float STEP = 360.0f / RING_LINE;
 
 volatile uint8_t LineInfo[RING_LINE];
 
 uint8_t brightness = 230;
-uint8_t threshold = 155;
+uint8_t threshold = 120;
 
 inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
   switch (i) {
@@ -81,6 +82,10 @@ void sendInt16(int16_t val);
 void sensorInfo();
 uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
+bool calcLineTraceAngleFromRing16(int16_t radius,int16_t *normalAngle,int16_t *normalDist);
+double wrapAngle360(double angle);
+double wrapangle180(double angle);
+
 
 void setup() {
   SerialPC.begin(115200);
@@ -117,7 +122,7 @@ void setup() {
   pinMode(IN16, INPUT_PULLUP);
 }
 
-void loop() {
+void loop() {  
   int16_t angle = calcEscapeAngleFromRing16();
 
   if (SerialMain.available()) {
@@ -130,6 +135,20 @@ void loop() {
     else if (cmd == LINE_SENSOR_INFO) {
       sensorInfo();
     }
+    else if (cmd == LINE_TRACE_INFO) {
+      int16_t lineangle = 0;
+      int16_t linedist = 0;
+      bool calclinesuccess = calcLineTraceAngleFromRing16(100, &lineangle, &linedist);
+      if(calclinesuccess){
+        sendInt16(lineangle);
+        sendInt16(linedist);
+      }else{
+        // 検出できなかった場合は特定の値を送る（例: -1.0）
+        int16_t notDetected = -1;
+        sendInt16(notDetected);
+        sendInt16(notDetected);
+      }
+    }
     else if (cmd == LINE_SetThreshold) {
       uint8_t val = readThreshold();
       if (val != 0xFF) {
@@ -141,6 +160,7 @@ void loop() {
       SerialPC.println("Reset Angle");
     }
   }
+
 }
 
 void setupTimer() {
@@ -280,6 +300,192 @@ int16_t calcEscapeAngleFromRing16() {
   }
 }
 
+bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t *normalDist){
+  uint8_t buf[RING_LINE];
+
+  noInterrupts();
+  memcpy(buf, (const void*)LineInfo, RING_LINE);
+  interrupts();
+
+  int segStart[8];
+  int segEnd[8];
+  int segLen[8];
+  int segCount = 0;
+
+  bool inSeg = false;
+
+  // -------------------------
+  // 1. 反応センサの塊を検出
+  // -------------------------
+  for(int i = 0; i < RING_LINE; i++){
+    if(buf[i]){
+      if(!inSeg){
+        segStart[segCount] = i;
+        inSeg = true;
+      }
+    }else{
+      if(inSeg){
+        segEnd[segCount] = i - 1;
+        segCount++;
+        inSeg = false;
+      }
+    }
+  }
+
+  if(inSeg){
+    segEnd[segCount] = RING_LINE - 1;
+    segCount++;
+  }
+
+  if(segCount == 0) return false;
+
+  // -------------------------
+  // 2. 0番またぎの塊を結合
+  // -------------------------
+  if(segCount >= 2 && buf[0] && buf[RING_LINE - 1]){
+    segStart[0] = segStart[segCount - 1];
+    segCount--;
+  }
+
+  // -------------------------
+  // 3. 各塊の長さを求める
+  // -------------------------
+  for(int i = 0; i < segCount; i++){
+    if(segStart[i] <= segEnd[i]){
+      segLen[i] = segEnd[i] - segStart[i] + 1;
+    }else{
+      segLen[i] = (RING_LINE - segStart[i]) + (segEnd[i] + 1);
+    }
+  }
+
+  // -------------------------
+  // 4. 各塊の中心座標を求める
+  // -------------------------
+  float cx[8];
+  float cy[8];
+
+  for(int s = 0; s < segCount; s++){
+    float sumX = 0.0f;
+    float sumY = 0.0f;
+    int cnt = 0;
+
+    int i = segStart[s];
+    while(true){
+      float ang = -i * STEP * DEG_TO_RAD;
+      sumX += radius * cosf(ang);
+      sumY += radius * sinf(ang);
+      cnt++;
+
+      if(i == segEnd[s]) break;
+      i = (i + 1) % RING_LINE;
+    }
+
+    if(cnt == 0) return false;
+
+    cx[s] = sumX / cnt;
+    cy[s] = sumY / cnt;
+  }
+
+  float x1, y1, x2, y2;
+
+  // -------------------------
+  // 5-A. 塊が1個なら両端を使う
+  // -------------------------
+  if(segCount == 1){
+    int s = segStart[0];
+    int e = segEnd[0];
+
+    float a1 = -s * STEP * DEG_TO_RAD;
+    float a2 = -e * STEP * DEG_TO_RAD;
+
+    x1 = radius * cosf(a1);
+    y1 = radius * sinf(a1);
+    x2 = radius * cosf(a2);
+    y2 = radius * sinf(a2);
+  }
+  // -------------------------
+  // 5-B. 塊が2個以上なら大きい2塊の中心を使う
+  // -------------------------
+  else{
+    int best1 = -1, best2 = -1;
+    int len1 = -1, len2 = -1;
+
+    for(int i = 0; i < segCount; i++){
+      if(segLen[i] > len1){
+        len2 = len1;
+        best2 = best1;
+        len1 = segLen[i];
+        best1 = i;
+      }else if(segLen[i] > len2){
+        len2 = segLen[i];
+        best2 = i;
+      }
+    }
+
+    if(best1 < 0 || best2 < 0) return false;
+
+    x1 = cx[best1];
+    y1 = cy[best1];
+    x2 = cx[best2];
+    y2 = cy[best2];
+  }
+
+  // -------------------------
+  // 6. 2点を結ぶ直線を作る
+  // -------------------------
+  float dx = x2 - x1;
+  float dy = y2 - y1;
+
+  float len = sqrtf(dx * dx + dy * dy);
+  if(len < 1e-6f) return false;
+
+  // -------------------------
+  // 7. 機体中心から直線までの最短距離
+  // -------------------------
+  float cross = x1 * y2 - y1 * x2;
+  *normalDist = (int16_t)(fabsf(cross) / len + 0.5f);
+
+  // -------------------------
+  // 8. 法線ベクトルを求める
+  // 直線方向(dx,dy)に対して垂直なのは2通り
+  // (-dy, dx) と (dy, -dx)
+  // 線のある側を向く方を選ぶ
+  // -------------------------
+  float nx1 = -dy;
+  float ny1 =  dx;
+
+  float nx2 =  dy;
+  float ny2 = -dx;
+
+  float mx = (x1 + x2) * 0.5f;
+  float my = (y1 + y2) * 0.5f;
+
+  float dot1 = nx1 * mx + ny1 * my;
+
+  float nx, ny;
+  if(dot1 >= 0.0f){
+    nx = nx1;
+    ny = ny1;
+  }else{
+    nx = nx2;
+    ny = ny2;
+  }
+
+  float nlen = sqrtf(nx * nx + ny * ny);
+  if(nlen < 1e-6f) return false;
+
+  nx /= nlen;
+  ny /= nlen;
+
+  float ang = -atan2f(ny, nx) * RAD_TO_DEG;
+  while(ang < 0.0f)   ang += 360.0f;
+  while(ang >= 360.0f) ang -= 360.0f;
+
+  *normalAngle = (int16_t)(ang + 0.5f);
+
+  return true;
+}
+
 void sendInt16(int16_t val){
   byte *data = (byte *)&val;
   SerialMain.write(data[0]);
@@ -292,4 +498,16 @@ uint8_t readThreshold() {
     if (millis() - start > 10) return 0xFF;
   }
   return SerialMain.read();
+}
+
+double wrapAngle360(double angle) {
+  while (angle >= 360.0) angle -= 360.0;
+  while (angle < 0.0) angle += 360.0;
+  return angle;
+}
+
+double wrapangle180(double angle) {
+  while (angle > 180.0) angle -= 360.0;
+  while (angle < -180.0) angle += 360.0;
+  return angle;
 }
