@@ -81,6 +81,10 @@ void sendInt16(int16_t val);
 void sensorInfo();
 uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
+bool calcLineTraceFromRing16(float radius,float *normalAngle,float *normalDist);
+double wrapAngle360(double angle);
+double wrapangle180(double angle);
+
 
 void setup() {
   SerialPC.begin(115200);
@@ -118,6 +122,20 @@ void setup() {
 }
 
 void loop() {
+  //tsts
+  float lineangle = 0;
+  float linedist = 0;
+  bool calclinesuccess = calcLineTraceFromRing16(1.0, &lineangle, &linedist);
+  if(calclinesuccess){
+    SerialPC.print("Line Angle: ");
+    SerialPC.println(lineangle);
+    SerialPC.print(" Line Dist: ");
+    SerialPC.println(linedist);
+  }else{
+    SerialPC.println("Line Not Detected");
+  }
+
+  /*
   int16_t angle = calcEscapeAngleFromRing16();
 
   if (SerialMain.available()) {
@@ -141,6 +159,7 @@ void loop() {
       SerialPC.println("Reset Angle");
     }
   }
+    */
 }
 
 void setupTimer() {
@@ -280,6 +299,108 @@ int16_t calcEscapeAngleFromRing16() {
   }
 }
 
+bool calcLineTraceFromRing16(float radius,float *normalAngle,float *normalDist){
+  uint8_t buf[RING_LINE];
+
+  noInterrupts();
+  memcpy(buf, (const void*)LineInfo, RING_LINE);
+  interrupts();
+
+  int first = -1;
+  int last = -1;
+  int count = 0;
+
+  // 反応のあるセンサの最初と最後を探す
+  for(int i = 0; i < RING_LINE; i++){
+    if(buf[i]){
+      if(first == -1) first = i;
+      last = i;
+      count++;
+    }
+  }
+
+  // 2点未満のときは不可
+  if(count < 2){
+    return false;
+  }
+
+  // 0番またぎ対応
+  if(buf[0] && buf[RING_LINE - 1]){
+    int t = RING_LINE - 1;
+    while(t >= 0 && buf[t]) t--;
+    first = t + 1;
+
+    int h = 0;
+    while(h < RING_LINE && buf[h]) h++;
+    last = h - 1;
+  }
+
+  // センサ角度
+  float a1 = -first * STEP * DEG_TO_RAD;
+  float a2 = -last  * STEP * DEG_TO_RAD;
+
+  // 円周上の端点
+  float x1 = radius * cos(a1);
+  float y1 = radius * sin(a1);
+  float x2 = radius * cos(a2);
+  float y2 = radius * sin(a2);
+
+  // 白線方向ベクトル
+  float dx = x2 - x1;
+  float dy = y2 - y1;
+
+  float len = sqrtf(dx*dx + dy*dy);
+  if(len < 1e-6f) return false;
+
+
+  // 機体中心から直線までの最短距離
+  float cross = x1*y2 - y1*x2;
+  *normalDist = fabsf(cross) / len;
+
+  // -------------------------
+  // 垂線方向
+  // 白線に垂直なベクトルは2通りある
+  // (-dy, dx) と (dy, -dx)
+  // そのうち「白線のある側」を向く方を選ぶ
+  // -------------------------
+  float nx1 = -dy;
+  float ny1 =  dx;
+
+  float nx2 =  dy;
+  float ny2 = -dx;
+
+  // 白線の中点
+  float mx = (x1 + x2) * 0.5f;
+  float my = (y1 + y2) * 0.5f;
+
+  // 中点方向と同じ側を向く法線を採用
+  float dot1 = nx1*mx + ny1*my;
+
+  float nx, ny;
+  if(dot1 >= 0){
+    nx = nx1;
+    ny = ny1;
+  }else{
+    nx = nx2;
+    ny = ny2;
+  }
+
+  // 正規化
+  float nlen = sqrtf(nx*nx + ny*ny);
+  if(nlen < 1e-6f) return false;
+
+  nx /= nlen;
+  ny /= nlen;
+
+  float ang = -atan2f(ny, nx) * RAD_TO_DEG;
+  while(ang < 0.0f) ang += 360.0f;
+  while(ang >= 360.0f) ang -= 360.0f;
+
+  *normalAngle = ang;
+
+  return true;
+}
+
 void sendInt16(int16_t val){
   byte *data = (byte *)&val;
   SerialMain.write(data[0]);
@@ -292,4 +413,16 @@ uint8_t readThreshold() {
     if (millis() - start > 10) return 0xFF;
   }
   return SerialMain.read();
+}
+
+double wrapAngle360(double angle) {
+  while (angle >= 360.0) angle -= 360.0;
+  while (angle < 0.0) angle += 360.0;
+  return angle;
+}
+
+double wrapangle180(double angle) {
+  while (angle > 180.0) angle -= 360.0;
+  while (angle < -180.0) angle += 360.0;
+  return angle;
 }
