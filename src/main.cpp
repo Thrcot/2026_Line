@@ -50,7 +50,7 @@ const float STEP = 360.0f / RING_LINE;
 volatile uint8_t LineInfo[RING_LINE];
 
 uint8_t brightness = 230;
-uint8_t threshold = 155;
+uint8_t threshold = 120;
 
 inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
   switch (i) {
