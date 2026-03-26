@@ -143,7 +143,6 @@ void loop() {
         sendInt16(lineangle);
         sendInt16(linedist);
       }else{
-        // 検出できなかった場合は特定の値を送る（例: -1.0）
         int16_t notDetected = -1;
         sendInt16(notDetected);
         sendInt16(notDetected);
