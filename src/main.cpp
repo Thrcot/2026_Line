@@ -314,9 +314,9 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
   // 端判定
   // 4番 + 8番  -> 右端
   // 8番 + 12番 -> 左端
-  if((buf[7] || buf[8] || buf[9]) && (buf[3] ||buf[4] || buf[5]|| buf[11] ||buf[12] || buf[13])){
-    if(buf[3] ||buf[4] || buf[5]) *sidestate = 1;
-    if(buf [11] || buf[12] ||buf[13]) *sidestate = 2;
+  if((buf[7] || buf[8] || buf[9]) && (buf[3] ||buf[4] || buf[5]|| buf[11] || buf[12] || buf[13])){
+    if((buf[3] ||buf[4] || buf[5]) && !((buf [11] || buf[12] ||buf[13]))) *sidestate = 1;
+    if((buf[11] || buf[12] ||buf[13]) && !((buf[3] ||buf[4] || buf[5]))) *sidestate = 2;
   }else {
     *sidestate = 0;
   }
