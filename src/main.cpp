@@ -56,7 +56,6 @@ uint8_t threshold = 120;
 static bool g_hasLastLineTrace = false;
 static int16_t g_lastLineAngle = 0;
 static int16_t g_lastLineDist = 0;
-static int8_t g_lastSideState = 0;
 static unsigned long g_lastLineDetectMs = 0;
 
 inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
@@ -90,7 +89,7 @@ uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
 bool calcLineTraceAngleFromRing16(int16_t radius,int16_t *normalAngle,int16_t *normalDist,int8_t *sidestate);
 bool useHeldLineTrace(int16_t *normalAngle, int16_t *normalDist, int8_t *sidestate);
-void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist, int8_t sidestate);
+void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist);
 
 double wrapAngle360(double angle);
 double wrapangle180(double angle);
@@ -168,6 +167,8 @@ void loop() {
       }
     }
     else if (cmd == LINE_RESET) {
+      g_hasLastLineTrace = false;
+      g_lastLineDetectMs = 0;
       SerialPC.println("Reset Angle");
     }
   }
@@ -358,6 +359,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     segCount++;
   }
 
+  // 見失ったときだけ保持を使う
   if(segCount == 0){
     return useHeldLineTrace(normalAngle, normalDist, sidestate);
   }
@@ -398,7 +400,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     }
 
     if(cnt == 0){
-      return useHeldLineTrace(normalAngle, normalDist, sidestate);
+      return false;
     }
 
     cx[s] = sumX / cnt;
@@ -438,7 +440,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     }
 
     if(best1 < 0 || best2 < 0){
-      return useHeldLineTrace(normalAngle, normalDist, sidestate);
+      return false;
     }
 
     x1 = cx[best1];
@@ -453,7 +455,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
 
   float len = sqrtf(dx * dx + dy * dy);
   if(len < 1e-6f){
-    return useHeldLineTrace(normalAngle, normalDist, sidestate);
+    return false;
   }
 
   // 7. 機体中心から直線までの最短距離
@@ -483,7 +485,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
 
   float nlen = sqrtf(nx * nx + ny * ny);
   if(nlen < 1e-6f){
-    return useHeldLineTrace(normalAngle, normalDist, sidestate);
+    return false;
   }
 
   nx /= nlen;
@@ -496,7 +498,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
   *normalAngle = (int16_t)(ang + 0.5f);
 
   // 正常検出できたので更新
-  updateHeldLineTrace(*normalAngle, *normalDist, *sidestate);
+  updateHeldLineTrace(*normalAngle, *normalDist);
 
   return true;
 }
@@ -505,17 +507,16 @@ bool useHeldLineTrace(int16_t *normalAngle, int16_t *normalDist, int8_t *sidesta
   if(g_hasLastLineTrace && (uint32_t)(millis() - g_lastLineDetectMs) <= 500){
     *normalAngle = g_lastLineAngle;
     *normalDist  = g_lastLineDist;
-    *sidestate   = g_lastSideState;
+    *sidestate   = 3;   // 保持中
     return true;
   }
   return false;
 }
 
-void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist, int8_t sidestate){
+void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist){
   g_hasLastLineTrace = true;
   g_lastLineAngle = normalAngle;
   g_lastLineDist = normalDist;
-  g_lastSideState = sidestate;
   g_lastLineDetectMs = millis();
 }
 
