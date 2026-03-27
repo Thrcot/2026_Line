@@ -53,6 +53,12 @@ volatile uint8_t LineInfo[RING_LINE];
 uint8_t brightness = 230;
 uint8_t threshold = 120;
 
+static bool g_hasLastLineTrace = false;
+static int16_t g_lastLineAngle = 0;
+static int16_t g_lastLineDist = 0;
+static int8_t g_lastSideState = 0;
+static unsigned long g_lastLineDetectMs = 0;
+
 inline int fastReadIndex(int i, uint32_t A, uint32_t B, uint32_t C) {
   switch (i) {
     case 0:  return (C >> 13) & 1;
@@ -83,6 +89,9 @@ void sensorInfo();
 uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
 bool calcLineTraceAngleFromRing16(int16_t radius,int16_t *normalAngle,int16_t *normalDist,int8_t *sidestate);
+bool useHeldLineTrace(int16_t *normalAngle, int16_t *normalDist, int8_t *sidestate);
+void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist, int8_t sidestate);
+
 double wrapAngle360(double angle);
 double wrapangle180(double angle);
 
@@ -314,10 +323,10 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
   // 端判定
   // 4番 + 8番  -> 右端
   // 8番 + 12番 -> 左端
-  if((buf[7] || buf[8] || buf[9]) && (buf[3] ||buf[4] || buf[5]|| buf[11] || buf[12] || buf[13])){
-    if((buf[3] ||buf[4] || buf[5]) && !((buf [11] || buf[12] ||buf[13]))) *sidestate = 1;
-    if((buf[11] || buf[12] ||buf[13]) && !((buf[3] ||buf[4] || buf[5]))) *sidestate = 2;
-  }else {
+  if((buf[7] || buf[8] || buf[9]) && (buf[3] || buf[4] || buf[5] || buf[11] || buf[12] || buf[13])){
+    if((buf[3] || buf[4] || buf[5]) && !((buf[11] || buf[12] || buf[13]))) *sidestate = 1;
+    if((buf[11] || buf[12] || buf[13]) && !((buf[3] || buf[4] || buf[5]))) *sidestate = 2;
+  }else{
     *sidestate = 0;
   }
 
@@ -328,9 +337,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
 
   bool inSeg = false;
 
-  // -------------------------
   // 1. 反応センサの塊を検出
-  // -------------------------
   for(int i = 0; i < RING_LINE; i++){
     if(buf[i]){
       if(!inSeg){
@@ -351,19 +358,17 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     segCount++;
   }
 
-  if(segCount == 0) return false;
+  if(segCount == 0){
+    return useHeldLineTrace(normalAngle, normalDist, sidestate);
+  }
 
-  // -------------------------
   // 2. 0番またぎの塊を結合
-  // -------------------------
   if(segCount >= 2 && buf[0] && buf[RING_LINE - 1]){
     segStart[0] = segStart[segCount - 1];
     segCount--;
   }
 
-  // -------------------------
-  // 3. 各塊の長さを求める
-  // -------------------------
+  // 3. 各塊の長さ
   for(int i = 0; i < segCount; i++){
     if(segStart[i] <= segEnd[i]){
       segLen[i] = segEnd[i] - segStart[i] + 1;
@@ -372,9 +377,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     }
   }
 
-  // -------------------------
-  // 4. 各塊の中心座標を求める
-  // -------------------------
+  // 4. 各塊の中心座標
   float cx[8];
   float cy[8];
 
@@ -394,7 +397,9 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
       i = (i + 1) % RING_LINE;
     }
 
-    if(cnt == 0) return false;
+    if(cnt == 0){
+      return useHeldLineTrace(normalAngle, normalDist, sidestate);
+    }
 
     cx[s] = sumX / cnt;
     cy[s] = sumY / cnt;
@@ -402,9 +407,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
 
   float x1, y1, x2, y2;
 
-  // -------------------------
   // 5-A. 塊が1個なら両端を使う
-  // -------------------------
   if(segCount == 1){
     int s = segStart[0];
     int e = segEnd[0];
@@ -417,9 +420,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     x2 = radius * cosf(a2);
     y2 = radius * sinf(a2);
   }
-  // -------------------------
   // 5-B. 塊が2個以上なら大きい2塊の中心を使う
-  // -------------------------
   else{
     int best1 = -1, best2 = -1;
     int len1 = -1, len2 = -1;
@@ -436,7 +437,9 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
       }
     }
 
-    if(best1 < 0 || best2 < 0) return false;
+    if(best1 < 0 || best2 < 0){
+      return useHeldLineTrace(normalAngle, normalDist, sidestate);
+    }
 
     x1 = cx[best1];
     y1 = cy[best1];
@@ -444,27 +447,20 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
     y2 = cy[best2];
   }
 
-  // -------------------------
-  // 6. 2点を結ぶ直線を作る
-  // -------------------------
+  // 6. 2点を結ぶ直線
   float dx = x2 - x1;
   float dy = y2 - y1;
 
   float len = sqrtf(dx * dx + dy * dy);
-  if(len < 1e-6f) return false;
+  if(len < 1e-6f){
+    return useHeldLineTrace(normalAngle, normalDist, sidestate);
+  }
 
-  // -------------------------
   // 7. 機体中心から直線までの最短距離
-  // -------------------------
   float cross = x1 * y2 - y1 * x2;
   *normalDist = (int16_t)(fabsf(cross) / len + 0.5f);
 
-  // -------------------------
-  // 8. 法線ベクトルを求める
-  // 直線方向(dx,dy)に対して垂直なのは2通り
-  // (-dy, dx) と (dy, -dx)
-  // 線のある側を向く方を選ぶ
-  // -------------------------
+  // 8. 法線ベクトル
   float nx1 = -dy;
   float ny1 =  dx;
 
@@ -486,19 +482,43 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
   }
 
   float nlen = sqrtf(nx * nx + ny * ny);
-  if(nlen < 1e-6f) return false;
+  if(nlen < 1e-6f){
+    return useHeldLineTrace(normalAngle, normalDist, sidestate);
+  }
 
   nx /= nlen;
   ny /= nlen;
 
   float ang = -atan2f(ny, nx) * RAD_TO_DEG;
-  while(ang < 0.0f)   ang += 360.0f;
+  while(ang < 0.0f) ang += 360.0f;
   while(ang >= 360.0f) ang -= 360.0f;
 
   *normalAngle = (int16_t)(ang + 0.5f);
 
+  // 正常検出できたので更新
+  updateHeldLineTrace(*normalAngle, *normalDist, *sidestate);
+
   return true;
 }
+
+bool useHeldLineTrace(int16_t *normalAngle, int16_t *normalDist, int8_t *sidestate){
+  if(g_hasLastLineTrace && (uint32_t)(millis() - g_lastLineDetectMs) <= 500){
+    *normalAngle = g_lastLineAngle;
+    *normalDist  = g_lastLineDist;
+    *sidestate   = g_lastSideState;
+    return true;
+  }
+  return false;
+}
+
+void updateHeldLineTrace(int16_t normalAngle, int16_t normalDist, int8_t sidestate){
+  g_hasLastLineTrace = true;
+  g_lastLineAngle = normalAngle;
+  g_lastLineDist = normalDist;
+  g_lastSideState = sidestate;
+  g_lastLineDetectMs = millis();
+}
+
 
 void sendInt16(int16_t val){
   byte *data = (byte *)&val;
