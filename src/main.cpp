@@ -507,7 +507,7 @@ bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t 
 }
 
 bool useHeldLineTrace(int16_t *normalAngle, int16_t *normalDist, int8_t *sidestate){
-  if(g_hasLastLineTrace && (uint32_t)(millis() - g_lastLineDetectMs) <= 500){
+  if(g_hasLastLineTrace && (uint32_t)(millis() - g_lastLineDetectMs) <= 1200){
     *normalAngle = g_lastLineAngle;
     *normalDist  = g_lastLineDist;
     *sidestate   = 3;   // 保持中
