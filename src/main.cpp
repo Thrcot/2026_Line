@@ -291,7 +291,6 @@ int16_t calcEscapeAngleFromRing16() {
 
     return (int16_t)(limited + 0.5f);
   }
-
   else {
     if (escaping) {
       int d = abs(lastIndex - entryIndex);
@@ -305,7 +304,11 @@ int16_t calcEscapeAngleFromRing16() {
         return -1;
       }
       else {
-        return (int16_t)(escapeAngle + 0.5f);
+        // 最後に反応していたセンサ(lastIndex)の角度を返す
+        float sensorAngle = -lastIndex * STEP;
+        while (sensorAngle < 0) sensorAngle += 360.0f;
+        while (sensorAngle >= 360.0f) sensorAngle -= 360.0f;
+        return (int16_t)(sensorAngle + 0.5f);
       }
     }
     return -1;
