@@ -123,15 +123,6 @@ void setup() {
 }
 
 void loop() {  
-  //tsts
-  int16_t lineangle = 0;
-  int16_t linedist = 0;
-  int8_t sidestate = 0;
-  bool calclinesuccess = calcLineTraceAngleFromRing16(100, &lineangle, &linedist, &sidestate);
-
-  SerialPC.print("Side State: ");
-  SerialPC.println(sidestate);
-
   int16_t angle = calcEscapeAngleFromRing16();
   if (SerialMain.available()) {
     uint8_t cmd = SerialMain.read();
