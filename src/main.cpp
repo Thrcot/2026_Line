@@ -82,7 +82,7 @@ void sendInt16(int16_t val);
 void sensorInfo();
 uint8_t readThreshold();
 int16_t calcEscapeAngleFromRing16();
-bool calcLineTraceAngleFromRing16(int16_t radius,int16_t *normalAngle,int16_t *normalDist);
+bool calcLineTraceAngleFromRing16(int16_t radius,int16_t *normalAngle,int16_t *normalDist,int8_t *sidestate);
 double wrapAngle360(double angle);
 double wrapangle180(double angle);
 
@@ -123,8 +123,16 @@ void setup() {
 }
 
 void loop() {  
-  int16_t angle = calcEscapeAngleFromRing16();
+  //tsts
+  int16_t lineangle = 0;
+  int16_t linedist = 0;
+  int8_t sidestate = 0;
+  bool calclinesuccess = calcLineTraceAngleFromRing16(100, &lineangle, &linedist, &sidestate);
 
+  SerialPC.print("Side State: ");
+  SerialPC.println(sidestate);
+
+  int16_t angle = calcEscapeAngleFromRing16();
   if (SerialMain.available()) {
     uint8_t cmd = SerialMain.read();
 
@@ -138,14 +146,18 @@ void loop() {
     else if (cmd == LINE_TRACE_INFO) {
       int16_t lineangle = 0;
       int16_t linedist = 0;
-      bool calclinesuccess = calcLineTraceAngleFromRing16(100, &lineangle, &linedist);
+      int8_t sidestate = 0;
+      bool calclinesuccess = calcLineTraceAngleFromRing16(100, &lineangle, &linedist, &sidestate);
       if(calclinesuccess){
         sendInt16(lineangle);
         sendInt16(linedist);
+        SerialMain.write(sidestate);
       }else{
+        // 検出できなかった場合は特定の値を送る（例: -1.0）
         int16_t notDetected = -1;
         sendInt16(notDetected);
         sendInt16(notDetected);
+        SerialMain.write((int8_t)0); // sidestateも0を送る
       }
     }
     else if (cmd == LINE_SetThreshold) {
@@ -299,12 +311,24 @@ int16_t calcEscapeAngleFromRing16() {
   }
 }
 
-bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t *normalDist){
+bool calcLineTraceAngleFromRing16(int16_t radius, int16_t *normalAngle, int16_t *normalDist, int8_t *sidestate){
   uint8_t buf[RING_LINE];
 
   noInterrupts();
   memcpy(buf, (const void*)LineInfo, RING_LINE);
   interrupts();
+
+  *sidestate = 0;
+
+  // 端判定
+  // 4番 + 8番  -> 右端
+  // 8番 + 12番 -> 左端
+  if((buf[7] || buf[8] || buf[9]) && (buf[3] ||buf[4] || buf[5]|| buf[11] ||buf[12] || buf[13])){
+    if(buf[3] ||buf[4] || buf[5]) *sidestate = 1;
+    if(buf [11] || buf[12] ||buf[13]) *sidestate = 2;
+  }else {
+    *sidestate = 0;
+  }
 
   int segStart[8];
   int segEnd[8];
